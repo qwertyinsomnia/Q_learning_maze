@@ -1,6 +1,8 @@
 # Q_learning_maze
-UI界面基于Tkinter\\
-可以自定义maze\\
+UI界面基于Tkinter
+
+可以自定义maze
+
 ![Image text](https://raw.githubusercontent.com/qwertyinsomnia/Q_learning_maze/main/image/maze.png)
 
 上面这里可以更改迭代次数，下面这里去掉注释可以可视化他的运行过程
