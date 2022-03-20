@@ -3,8 +3,12 @@ import numpy as np
 import pandas as pd
 import time
 import os
+from collections import defaultdict
+import pickle
 
 UNIT = 80
+ENABLE_VISULIZE = 0
+ENABLE_Learning = 1
 
 class Maze(tk.Tk, object):
     def __init__(self, actions, current_location, end_location, maze):
@@ -23,6 +27,23 @@ class Maze(tk.Tk, object):
         self.bind("<Key>", self.manual_move)
         self.build_maze()
         self.canvas.pack()
+        self.check_allowed_states()
+
+    def check_allowed_states(self):
+        self.allowed_states = defaultdict(list)
+        for i in range(self.height):
+            for j in range(self.width):
+                if self.maze[i][j] == 1:
+                    continue
+                if j > 0  and self.maze[i][j - 1] != 1:
+                    self.allowed_states[(i, j)].append("L")
+                if j < self.width - 1  and self.maze[i][j + 1] != 1:
+                    self.allowed_states[(i, j)].append("R")
+                if i > 0  and self.maze[i - 1][j] != 1:
+                    self.allowed_states[(i, j)].append("U")
+                if i < self.height - 1  and self.maze[i + 1][j] != 1:
+                    self.allowed_states[(i, j)].append("D")
+        
     
     def build_maze(self):
         for c in range(0, self.width * UNIT, UNIT):
@@ -49,7 +70,6 @@ class Maze(tk.Tk, object):
     def reset(self):
         self.current_location = self.start_location
         self.build_maze()
-        # return state
         return self.current_location
     
     def valid_moves(self, action):
@@ -57,19 +77,16 @@ class Maze(tk.Tk, object):
         x = self.current_location[1]
         if y >= self.height or y < 0 or x >= self.width or x < 0 or self.maze[y][x] == 1:
             self.current_location =  (self.current_location[0] - self.actions[action][0], self.current_location[1] - self.actions[action][1])
-            # print("valid", self.current_location)
         else:
             self.current_location = (y, x)
 
     def step(self, action):
         self.current_location =  (self.current_location[0] + self.actions[action][0], self.current_location[1] + self.actions[action][1])
         self.valid_moves(action)
-        # print(self.current_location)
         self.build_maze()
 
-        s_ = self.current_location  # next state
+        s_ = self.current_location
 
-        # reward function
         if s_ == self.end_location:
             reward = 1
             done = True
@@ -125,10 +142,14 @@ class Maze(tk.Tk, object):
             elif right_length > 0:
                 right_length = UNIT / 4
             
-            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2, y * UNIT + UNIT / 2 - up_length, fill=fill_color[0], arrow = "last")
-            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2, y * UNIT + UNIT / 2 + down_length, fill=fill_color[1], arrow = "last")
-            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2 - left_length, y * UNIT + UNIT / 2, fill=fill_color[2], arrow = "last")
-            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2 + right_length, y * UNIT + UNIT / 2, fill=fill_color[3], arrow = "last")
+            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2, 
+                                    y * UNIT + UNIT / 2 - up_length, fill=fill_color[0], arrow = "last")
+            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2,
+                                    y * UNIT + UNIT / 2 + down_length, fill=fill_color[1], arrow = "last")
+            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2 - left_length,
+                                    y * UNIT + UNIT / 2, fill=fill_color[2], arrow = "last")
+            self.canvas.create_line(x * UNIT + UNIT / 2, y * UNIT + UNIT / 2, x * UNIT + UNIT / 2 + right_length,
+                                    y * UNIT + UNIT / 2, fill=fill_color[3], arrow = "last")
         
         self.update
 
@@ -155,8 +176,9 @@ class Maze(tk.Tk, object):
 
 
 class QLearningTable:
-    def __init__(self, actions, learning_rate=0.01, reward_decay=0.9, e_greedy=0.9):
+    def __init__(self, actions, allowed_states, learning_rate=0.01, reward_decay=0.9, e_greedy=0.75):
         self.actions = list(actions.keys())
+        self.allowed_states = allowed_states
         self.lr = learning_rate
         self.gamma = reward_decay
         self.epsilon = e_greedy
@@ -166,55 +188,61 @@ class QLearningTable:
             self.q_table = pd.DataFrame(columns=self.actions, dtype=np.float64)
 
     def choose_action(self, state):
-        self.check_state_exist(state)
-        # action selection
+        self.check_state_exist(str(state))
         if np.random.uniform() < self.epsilon:
             # choose best action
-            state_action = self.q_table.loc[state, :]
-            # some actions may have the same value, randomly choose on in these actions
+            state_action = self.q_table.loc[str(state), :]
             action = np.random.choice(state_action[state_action == np.max(state_action)].index)
         else:
-            # choose random action
-            action = np.random.choice(self.actions)
+            # choose random action and explore
+            # action = np.random.choice(self.actions)
+            action = np.random.choice(self.allowed_states[state])
         return action
 
     def learn(self, s, a, r, s_):
+        s = str(s)
+        s_ = str(s_)
         self.check_state_exist(s_)
-        q_predict = self.q_table.loc[s, a]
+        q_predict = self.q_table.loc[(s), a]
         if s_ != 'terminal':
-            q_target = r + self.gamma * self.q_table.loc[s_, :].max()  # next state is not terminal
+            q_target = r + self.gamma * self.q_table.loc[s_, :].max()
         else:
-            q_target = r  # next state is terminal
-        self.q_table.loc[s, a] += self.lr * (q_target - q_predict)  # update
+            q_target = r
+        self.q_table.loc[s, a] += self.lr * (q_target - q_predict)
 
     def check_state_exist(self, state):
         if state not in self.q_table.index:
-            # append new state to q table
             self.q_table = self.q_table.append(pd.Series([0]*len(self.actions), index=self.q_table.columns, name=state))
         
-def update():
-    for episode in range(40):
-        # initial state
+def learning_func():
+    step_list = []
+    for episode in range(500):
         state = env.reset()
-        print(state)
         step_cnt = 0
         while True:
             step_cnt += 1
-            action = RL.choose_action(str(state))
+            action = RL.choose_action(state)
             state_, reward, done = env.step(action)
-            # env.update()
-            # time.sleep(0.1)
-            RL.learn(str(state), action, reward, str(state_))
+            if ENABLE_VISULIZE:
+                env.update()
+                time.sleep(0.1)
+            RL.learn(state, action, reward, state_)
             state = state_
-            if done:
-                print(env.current_location, step_cnt)
+            if step_cnt > 1000:
+                print("step exceeding... you have lost...")
                 break
-    # print(RL.q_table)
+            if done:
+                print(env.current_location, "total step:  ", step_cnt)
+                break
+        
+        step_list.append(step_cnt)
+        with open('step.txt', 'wb') as text:
+            pickle.dump(step_list, text)
+    
     RL.q_table.to_json("Qtable.json")
     RL.q_table.to_csv("Qtable.csv")
     env.q_table_visulize(RL.q_table)
     print("Game Over")
-    # env.destroy()
 
 # Set up important variables
 actions = {'U': (-1, 0), 'D': (1, 0), 'L': (0, -1), 'R': (0, 1)}
@@ -228,13 +256,28 @@ maze = [[0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 1, 0, 0, 1, 0, 0],
         [0, 0, 0, 0, 0, 0, 1, 1],
         [0, 0, 0, 0, 1, 0, 0, 0]]
+# maze = [[0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+#         [1, 0, 0, 1, 0, 0, 1, 1, 1, 0],
+#         [0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+#         [0, 0, 1, 1, 0, 1, 1, 0, 0, 0],
+#         [0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+#         [0, 0, 0, 1, 0, 1, 0, 1, 1, 0],
+#         [0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
+#         [0, 1, 1, 0, 0, 1, 0, 0, 0, 0],
+#         [0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+#         [0, 0, 1, 1, 0, 0, 1, 0, 1, 0]]
+
 
 # Construct allowed states
-allowed_states = {}
+# allowed_states = {}
 
 env = Maze(actions, current_location, end_location, maze)
-RL = QLearningTable(actions)
-env.after(100, update)
+allowed_states = env.allowed_states
+# print(allowed_states)
+RL = QLearningTable(actions, allowed_states)
+if ENABLE_Learning:
+    env.after(100, learning_func)
+
 # The main loop where you navigate to the end
 # while (current_location != end_location):
 #     print_maze(maze)
